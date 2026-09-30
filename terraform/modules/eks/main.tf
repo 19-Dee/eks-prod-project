@@ -16,7 +16,7 @@ module "eks" {
   control_plane_subnet_ids = var.public_subnets
 
   eks_managed_node_group_defaults = {
-    instance_types = ["t3.small"]
+    instance_types = ["m7i-flex.large"]
   }
 
   eks_managed_node_groups = {
