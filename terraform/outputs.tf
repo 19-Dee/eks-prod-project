@@ -10,6 +10,6 @@ output "eks_cluster_endpoint" {
   value = module.eks.cluster_endpoint
 }
 
-output "load_balancer_controller_role_arn" {
-  value = module.irsa.load_balancer_controller_role_arn
+output "external_dns_role_arn" {
+  value = module.irsa.external_dns_role_arn
 }

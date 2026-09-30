@@ -1,0 +1,24 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: threat-composer
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    external-dns.alpha.kubernetes.io/hostname: eks.devopsbydishen.shop
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - eks.devopsbydishen.shop
+      secretName: threat-composer-tls
+  rules:
+    - host: eks.devopsbydishen.shop
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: threat-composer
+                port:
+                  number: 80

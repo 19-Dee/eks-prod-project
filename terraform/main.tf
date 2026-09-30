@@ -5,6 +5,7 @@ module "vpc" {
 resource "aws_ecr_repository" "threat_composer" {
   name                 = "threat-composer-eks"
   image_tag_mutability = "MUTABLE"
+  force_delete         = true
 
   image_scanning_configuration {
     scan_on_push = true
