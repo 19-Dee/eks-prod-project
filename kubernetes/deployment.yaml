@@ -1,0 +1,20 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: threat-composer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: threat-composer
+  template:
+    metadata:
+      labels:
+        app: threat-composer
+    spec:
+      containers:
+        - name: threat-composer
+          image: 142969859154.dkr.ecr.eu-west-2.amazonaws.com/threat-composer-eks:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 3000

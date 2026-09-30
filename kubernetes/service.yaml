@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: threat-composer
+spec:
+  type: ClusterIP
+  selector:
+    app: threat-composer
+  ports:
+    - port: 80
+      targetPort: 3000
