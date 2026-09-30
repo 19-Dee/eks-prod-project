@@ -14,3 +14,11 @@ resource "aws_ecr_repository" "threat_composer" {
     Project = "eks-threat-composer"
   }
 }
+
+module "eks" {
+  source = "./modules/eks"
+
+  vpc_id          = module.vpc.vpc_id
+  private_subnets = module.vpc.private_subnet_ids
+  public_subnets  = module.vpc.public_subnet_ids
+}
