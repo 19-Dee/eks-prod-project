@@ -1,0 +1,79 @@
+name: Build and Deploy Application
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "app/**"
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    env:
+      AWS_ACCOUNT_ID: "142969859154"
+      AWS_REGION: eu-west-2
+      ECR_REPOSITORY: threat-composer-eks
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::142969859154:role/eks-threat-composer-github-actions-ecr
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Log in to Amazon ECR
+        run: |
+          aws ecr get-login-password --region "${AWS_REGION}" | \
+            docker login \
+              --username AWS \
+              --password-stdin \
+              "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+
+      - name: Build application image
+        run: |
+          ECR_URI="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPOSITORY}:${GITHUB_SHA}"
+          echo "ECR_URI=${ECR_URI}" >> "${GITHUB_ENV}"
+
+          docker build \
+            --platform linux/amd64 \
+            -t "${ECR_URI}" \
+            ./app
+
+      - name: Scan image with Trivy
+        run: |
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | \
+            sh -s -- -b /usr/local/bin
+
+          trivy image \
+            --severity HIGH,CRITICAL \
+            "${ECR_URI}"
+
+      - name: Push image to ECR
+        run: |
+          docker push "${ECR_URI}"
+
+      - name: Update Kubernetes image
+        run: |
+          sed -i \
+            "s#image: .*threat-composer-eks:.*#image: ${ECR_URI}#" \
+            kubernetes/deployment.yaml
+
+      - name: Commit manifest update
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add kubernetes/deployment.yaml
+          git commit -m "Update Kubernetes image to ${GITHUB_SHA}"
+          git push
