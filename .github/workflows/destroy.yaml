@@ -1,0 +1,108 @@
+name: Destroy EKS Platform
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: 'Type "yes" to confirm destroy'
+        required: true
+        default: 'no'
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  destroy:
+    if: ${{ github.event.inputs.confirmation == 'yes' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    env:
+      AWS_REGION: eu-west-2
+      EKS_CLUSTER_NAME: threat-composer-eks
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::142969859154:role/eks-threat-composer-github-deploy
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Configure kubectl
+        run: |
+          aws eks update-kubeconfig \
+            --region "${AWS_REGION}" \
+            --name "${EKS_CLUSTER_NAME}"
+
+      - name: Remove ArgoCD application
+        run: |
+          kubectl delete application threat-composer \
+            -n argocd \
+            --ignore-not-found=true
+
+      - name: Remove application resources
+        run: |
+          kubectl delete -f kubernetes/ \
+            --ignore-not-found=true || true
+
+      - name: Remove NGINX Ingress Controller
+        run: |
+          helm uninstall ingress-nginx \
+            --namespace ingress-nginx || true
+
+      - name: Configure AWS destroy credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::142969859154:role/eks-threat-composer-github-destroy
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Wait for AWS load balancer cleanup
+        run: |
+          VPC_ID=$(aws eks describe-cluster \
+            --region "${AWS_REGION}" \
+            --name "${EKS_CLUSTER_NAME}" \
+            --query 'cluster.resourcesVpcConfig.vpcId' \
+            --output text)
+
+          for i in $(seq 1 30); do
+            COUNT=$(aws elbv2 describe-load-balancers \
+              --region "${AWS_REGION}" \
+              --query "length(LoadBalancers[?VpcId=='${VPC_ID}'])" \
+              --output text)
+
+            if [ "${COUNT}" = "0" ]; then
+              echo "No load balancers remain in VPC."
+              exit 0
+            fi
+
+            echo "${COUNT} load balancer(s) still present. Waiting..."
+            sleep 20
+          done
+
+          echo "Load balancer cleanup timed out."
+          exit 1
+
+      - name: Remove remaining Helm releases
+        run: |
+          helm uninstall external-dns -n external-dns || true
+          helm uninstall cert-manager -n cert-manager || true
+          helm uninstall argocd -n argocd || true
+          helm uninstall monitoring -n monitoring || true
+
+      - name: Remove namespaces
+        run: |
+          kubectl delete namespace ingress-nginx external-dns cert-manager argocd monitoring \
+            --ignore-not-found=true || true
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Destroy Terraform infrastructure
+        working-directory: terraform
+        run: |
+          terraform init
+          terraform destroy -auto-approve
