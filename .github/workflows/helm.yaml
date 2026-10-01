@@ -40,6 +40,7 @@ jobs:
           helm repo add jetstack https://charts.jetstack.io
           helm repo add external-dns https://kubernetes-sigs.github.io/external-dns/
           helm repo add argo https://argoproj.github.io/argo-helm
+          helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
           helm repo update
 
       - name: Install NGINX Ingress Controller
@@ -116,11 +117,20 @@ jobs:
         run: |
           kubectl apply -f argocd/application.yaml
 
+      - name: Install Prometheus and Grafana
+        run: |
+          helm upgrade --install monitoring prometheus-community/kube-prometheus-stack \
+            --namespace monitoring \
+            --create-namespace \
+            --wait \
+            --timeout 15m
+
       - name: Verify platform components
         run: |
           kubectl get pods -n ingress-nginx
           kubectl get pods -n cert-manager
           kubectl get pods -n external-dns
           kubectl get pods -n argocd
+          kubectl get pods -n monitoring
           kubectl get clusterissuer letsencrypt-prod
           kubectl get application threat-composer -n argocd
