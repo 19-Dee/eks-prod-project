@@ -125,6 +125,11 @@ jobs:
             --wait \
             --timeout 15m
 
+      - name: Expose ArgoCD and Grafana
+        run: |
+          kubectl apply -f platform/argocd-ingress.yaml
+          kubectl apply -f platform/grafana-ingress.yaml
+
       - name: Verify platform components
         run: |
           kubectl get pods -n ingress-nginx
@@ -134,3 +139,7 @@ jobs:
           kubectl get pods -n monitoring
           kubectl get clusterissuer letsencrypt-prod
           kubectl get application threat-composer -n argocd
+          kubectl get ingress -n argocd
+          kubectl get ingress -n monitoring
+          kubectl get certificate -n argocd
+          kubectl get certificate -n monitoring

@@ -30,7 +30,7 @@ The project focuses on deploying and operating the application on AWS using Kube
 
 ## Architecture
 
-<img width="2595" height="1977" alt="Threat Composer on AWS EKS Architecture" src="https://github.com/user-attachments/assets/87d39f26-bf7b-4bde-9d74-e9804ec0af99" />
+![Threat Composer on AWS EKS architecture](docs/eks-threat-composer-architecture.png)
 
 Application traffic follows this path:
 
@@ -60,7 +60,7 @@ The EKS worker nodes run in private subnets across two Availability Zones.
 
 Terraform provisions the AWS infrastructure, GitHub Actions builds and pushes container images to ECR, and ArgoCD reconciles the Kubernetes manifests stored in Git with the live EKS cluster.
 
-ExternalDNS manages the Route 53 application record, while cert-manager uses Let's Encrypt to issue and manage the TLS certificate.
+ExternalDNS manages Route 53 records for the public ingresses, while cert-manager uses Let's Encrypt HTTP-01 challenges to issue and renew their TLS certificates.
 
 ---
 
@@ -101,11 +101,13 @@ The GitHub Actions workflow:
 
 ArgoCD then detects the Git change and reconciles the desired state into EKS.
 
+Infrastructure changes use a separate, manually triggered Terraform workflow. After an operator types `yes` to confirm deployment, GitHub Actions assumes the Terraform IAM role through OIDC and runs Terraform 1.9.8, TFLint, init, validate, plan, and apply. Application image delivery remains separate in `.github/workflows/docker.yaml`.
+
 ---
 
 ## Observability
 
-The project uses `kube-prometheus-stack` for Kubernetes monitoring.
+The project uses `kube-prometheus-stack` for cluster monitoring.
 
 Prometheus collects cluster metrics and Grafana provides visibility into:
 
@@ -117,7 +119,7 @@ Prometheus collects cluster metrics and Grafana provides visibility into:
 
 <img width="2545" height="1283" alt="Grafana Kubernetes Monitoring Dashboard" src="https://github.com/user-attachments/assets/71ec554f-c05a-4e2e-9d70-23580f07f356" />
 
-Grafana was accessed using Kubernetes port forwarding rather than being exposed publicly.
+The intended public endpoint is `https://grafana.devopsbydishen.shop`, routed through NGINX Ingress to `monitoring-grafana:80`. ExternalDNS manages its Route 53 record and cert-manager requests its TLS certificate from Let's Encrypt.
 
 ---
 
@@ -131,6 +133,8 @@ ArgoCD successfully reconciled the application and reported it as:
 <img width="2092" height="1125" alt="ArgoCD Threat Composer Healthy and Synced" src="https://github.com/user-attachments/assets/64b74517-caf9-457b-8af4-0eadff55afe7" />
 
 The ArgoCD resource tree shows the Deployment, ReplicaSet, Pod, Service, Ingress, and TLS Certificate managed through GitOps.
+
+The intended public endpoint is `https://argocd.devopsbydishen.shop`. NGINX connects to the `argocd-server:443` backend over HTTPS.
 
 ---
 
@@ -206,9 +210,13 @@ terraform plan
 
 ### 4. Provision the infrastructure
 
-```bash
-terraform apply
+Manually run the GitHub Actions workflow and enter `yes` when prompted:
+
+```text
+Terraform EKS Infrastructure
 ```
+
+The workflow authenticates to AWS using OIDC, validates the Terraform configuration, creates a plan, and applies it. This is an operator-confirmed deployment; it is not PR-gated.
 
 ### 5. Deploy the Kubernetes platform
 
@@ -237,6 +245,12 @@ kubectl get nodes
 kubectl get pods
 kubectl get ingress
 ```
+
+Verify the three intended HTTPS endpoints:
+
+- Threat Composer: `https://eks.devopsbydishen.shop`
+- Grafana: `https://grafana.devopsbydishen.shop`
+- ArgoCD: `https://argocd.devopsbydishen.shop`
 
 ArgoCD should report the application as:
 
@@ -293,7 +307,7 @@ Its `LoadBalancer` Service provisions an AWS Network Load Balancer, while Kubern
 
 cert-manager uses an HTTP-01 ACME challenge through NGINX to prove ownership of the application hostname to Let's Encrypt.
 
-This avoided giving cert-manager Route 53 permissions because the project only required a certificate for a single public hostname.
+This avoids giving cert-manager Route 53 permissions. ExternalDNS manages DNS records, while cert-manager completes HTTP-01 challenges through NGINX for the public hostnames.
 
 ### Why GitHub OIDC?
 
@@ -321,4 +335,4 @@ A production environment requiring stronger Availability Zone independence would
 
 ## Project Status
 
-The infrastructure, Kubernetes platform, HTTPS configuration, GitOps deployment, monitoring stack, and teardown process have been implemented and tested.
+The original Threat Composer deployment, GitOps reconciliation, monitoring stack, HTTPS application endpoint, and teardown have prior test evidence in this repository. This closeout revision adds the OIDC Terraform workflow and public Grafana and ArgoCD ingresses, but a fresh end-to-end apply, platform deployment, endpoint check, GitOps reconciliation, and teardown still need to be run after the changes are committed.

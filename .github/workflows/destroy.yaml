@@ -44,8 +44,10 @@ jobs:
             -n argocd \
             --ignore-not-found=true
 
-      - name: Remove application resources
+      - name: Remove application resources and public ingress resources
         run: |
+          kubectl delete -f platform/ \
+            --ignore-not-found=true || true
           kubectl delete -f kubernetes/ \
             --ignore-not-found=true || true
 
