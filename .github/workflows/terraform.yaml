@@ -34,7 +34,7 @@ jobs:
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@v3
         with:
-          terraform_version: 1.9.8
+          terraform_version: 1.13.3
 
       - name: Set up TFLint
         uses: terraform-linters/setup-tflint@v4
@@ -45,7 +45,9 @@ jobs:
 
       - name: TFLint Check
         working-directory: terraform
-        run: tflint
+        run: |
+          tflint --init
+          tflint
 
       - name: Terraform Validate
         working-directory: terraform
