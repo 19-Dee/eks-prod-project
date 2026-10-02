@@ -1,5 +1,11 @@
 # AWS EKS GitOps Platform for Threat Composer
 
+---
+
+<img width="2555" height="1374" alt="Screenshot 2026-10-02 at 13 39 36" src="https://github.com/user-attachments/assets/b748fdd7-6f52-4696-82cc-a354c931a1c2" />
+
+---
+
 A containerised deployment of AWS Threat Composer on Amazon EKS using Terraform for infrastructure, GitHub Actions for CI, ArgoCD for GitOps deployment, and Prometheus + Grafana for monitoring.
 
 The project focuses on deploying and operating the application on AWS using Kubernetes, infrastructure as code, automated delivery, HTTPS, DNS automation, workload identity, and observability.
