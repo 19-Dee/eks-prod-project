@@ -14,7 +14,7 @@ spec:
     spec:
       containers:
         - name: threat-composer
-          image: 142969859154.dkr.ecr.eu-west-2.amazonaws.com/threat-composer-eks:b56049fb0e1996139d10956f85a781eff79876f7
+          image: 142969859154.dkr.ecr.eu-west-2.amazonaws.com/threat-composer-eks:9e6ce5ea710cb17460bf5bcd4fa9492d796fd4f2
           imagePullPolicy: Always
           ports:
             - containerPort: 3000
