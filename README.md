@@ -36,7 +36,9 @@ The project focuses on deploying and operating the application on AWS using Kube
 
 ## Architecture
 
-![Threat Composer on AWS EKS architecture](docs/eks-threat-composer-architecture.png)
+![Threat Composer on AWS EKS architecture](docs/eks-threat-composer-architecture.svg)
+
+[Edit the architecture diagram in draw.io](docs/eks-threat-composer-architecture.drawio)
 
 Application traffic follows this path:
 
