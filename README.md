@@ -103,7 +103,7 @@ GitHub Actions
 
 Pull requests run application tests, a production build, a `linux/amd64` image build, a Trivy vulnerability gate, and HTTP smoke tests without using AWS credentials. The gate fails for fixable `HIGH` or `CRITICAL` operating-system or library vulnerabilities; unfixed findings remain visible without blocking delivery.
 
-After the same checks pass on `main`, the deployment job:
+Pushes to `main` run the same verification checks but do not access AWS or deploy automatically. When an operator deliberately runs the workflow against `main`, the deployment job runs after verification and:
 
 1. authenticates to AWS using OIDC
 2. builds and rescans the production image
@@ -250,7 +250,7 @@ This installs:
 
 ### 6. Deploy the application
 
-Run the application pipeline or push an application change to `main`.
+Run the application workflow manually against `main`. A normal push verifies the application but does not publish an image or change the GitOps manifest.
 
 ### 7. Verify the deployment
 
