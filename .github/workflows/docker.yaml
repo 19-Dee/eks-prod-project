@@ -1,27 +1,104 @@
-name: Build and Deploy Application
+name: Application CI and GitOps Handoff
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
+  pull_request:
+    branches: [main]
     paths:
       - "app/**"
+      - ".github/workflows/docker.yaml"
+  push:
+    branches: [main]
+    paths:
+      - "app/**"
+      - ".github/workflows/docker.yaml"
+
+concurrency:
+  group: eks-application-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
-  contents: write
-  id-token: write
+  contents: read
+
+env:
+  AWS_ACCOUNT_ID: "142969859154"
+  AWS_REGION: eu-west-2
+  ECR_REPOSITORY: threat-composer-eks
 
 jobs:
-  deploy:
+  verify:
+    name: Test, build, scan and smoke test
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+          cache: yarn
+          cache-dependency-path: app/yarn.lock
+
+      - name: Install dependencies
+        working-directory: app
+        run: yarn install --frozen-lockfile
+
+      - name: Run application tests
+        working-directory: app
+        env:
+          CI: "true"
+        run: yarn test --watchAll=false --runInBand
+
+      - name: Build production application
+        working-directory: app
+        run: yarn build
+
+      - name: Build container image
+        run: docker build --platform linux/amd64 -t "threat-composer:${GITHUB_SHA}" ./app
+
+      - name: Gate fixable high and critical vulnerabilities
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: threat-composer:${{ github.sha }}
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          scanners: vuln
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
+
+      - name: Smoke test production container
+        run: |
+          docker run --rm -d --name threat-composer-smoke -p 3000:3000 "threat-composer:${GITHUB_SHA}"
+          trap 'docker stop threat-composer-smoke >/dev/null 2>&1 || true' EXIT
+
+          for attempt in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:3000/healthz >/dev/null; then
+              break
+            fi
+            if [ "${attempt}" -eq 30 ]; then
+              docker logs threat-composer-smoke
+              exit 1
+            fi
+            sleep 2
+          done
+
+          curl --fail --silent http://127.0.0.1:3000/ | grep -q '<title>threat-composer</title>'
+          curl --fail --silent http://127.0.0.1:3000/workspaces/example | grep -q '<title>threat-composer</title>'
+
+  deploy:
+    name: Publish image and update GitOps source
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      id-token: write
     env:
-      AWS_ACCOUNT_ID: "142969859154"
-      AWS_REGION: eu-west-2
-      ECR_REPOSITORY: threat-composer-eks
-
+      ECR_URI: 142969859154.dkr.ecr.eu-west-2.amazonaws.com/threat-composer-eks:${{ github.sha }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -33,47 +110,44 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Log in to Amazon ECR
-        run: |
-          aws ecr get-login-password --region "${AWS_REGION}" | \
-            docker login \
-              --username AWS \
-              --password-stdin \
-              "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+        uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Build application image
-        run: |
-          ECR_URI="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPOSITORY}:${GITHUB_SHA}"
-          echo "ECR_URI=${ECR_URI}" >> "${GITHUB_ENV}"
+      - name: Build immutable image
+        run: docker build --platform linux/amd64 -t "${ECR_URI}" ./app
 
-          docker build \
-            --platform linux/amd64 \
-            -t "${ECR_URI}" \
-            ./app
-
-      - name: Scan image with Trivy
-        run: |
-          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | \
-            sh -s -- -b /usr/local/bin
-
-          trivy image \
-            --severity HIGH,CRITICAL \
-            "${ECR_URI}"
+      - name: Gate fixable high and critical vulnerabilities
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ env.ECR_URI }}
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          scanners: vuln
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
 
       - name: Push image to ECR
-        run: |
-          docker push "${ECR_URI}"
+        run: docker push "${ECR_URI}"
 
       - name: Update Kubernetes image
         run: |
-          sed -i \
-            "s#image: .*threat-composer-eks:.*#image: ${ECR_URI}#" \
-            kubernetes/deployment.yaml
+          sed -i "s#image: .*threat-composer-eks:.*#image: ${ECR_URI}#" kubernetes/deployment.yaml
 
-      - name: Commit manifest update
+      - name: Commit GitOps manifest update
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
           git add kubernetes/deployment.yaml
-          git commit -m "Update Kubernetes image to ${GITHUB_SHA}"
+          git commit -m "Deploy application image ${GITHUB_SHA}"
           git push
+
+      - name: Record GitOps handoff boundary
+        run: |
+          {
+            echo "## GitOps handoff complete"
+            echo ""
+            echo "Published \`${ECR_URI}\` and committed it to \`kubernetes/deployment.yaml\`."
+            echo ""
+            echo "This job does not prove Argo CD is Synced/Healthy or that the Kubernetes rollout completed."
+            echo "Run \`scripts/verify-gitops.sh ${ECR_URI}\` with authenticated Argo CD and kubectl access."
+          } >> "${GITHUB_STEP_SUMMARY}"

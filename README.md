@@ -82,9 +82,13 @@ Application change
        v
 GitHub Actions
        |
-       +----> Build Docker image
+       +----> Run 13 test suites
        |
-       +----> Trivy scan
+       +----> Build production application and Docker image
+       |
+       +----> Trivy gate for fixable HIGH/CRITICAL vulnerabilities
+       |
+       +----> Container health and route smoke tests
        |
        +----> Push SHA-tagged image to Amazon ECR
        |
@@ -97,17 +101,17 @@ GitHub Actions
                        Amazon EKS
 ```
 
-The GitHub Actions workflow:
+Pull requests run application tests, a production build, a `linux/amd64` image build, a Trivy vulnerability gate, and HTTP smoke tests without using AWS credentials. The gate fails for fixable `HIGH` or `CRITICAL` operating-system or library vulnerabilities; unfixed findings remain visible without blocking delivery.
+
+Pushes to `main` run the same verification checks but do not access AWS or deploy automatically. When an operator deliberately runs the workflow against `main`, the deployment job runs after verification and:
 
 1. authenticates to AWS using OIDC
-2. builds the Docker image
-3. scans the image with Trivy
-4. tags the image using the Git commit SHA
-5. pushes the image to Amazon ECR
-6. updates the Kubernetes Deployment manifest
-7. commits the new image tag back to Git
+2. builds and rescans the production image
+3. tags and pushes the image using the Git commit SHA
+4. updates the Kubernetes Deployment manifest
+5. commits the new immutable image reference back to Git
 
-ArgoCD then detects the Git change and reconciles the desired state into EKS.
+This is the **GitOps handoff**, not proof of a completed deployment. ArgoCD must then detect the Git change and reconcile it into EKS. `scripts/verify-gitops.sh <expected-image-uri>` separately waits for ArgoCD `Synced` and `Healthy`, waits for the Kubernetes rollout, and confirms that the Deployment uses the expected image.
 
 Infrastructure changes use a separate, manually triggered Terraform workflow. After an operator types `yes` to confirm deployment, GitHub Actions assumes the Terraform IAM role through OIDC and runs Terraform 1.9.8, TFLint, init, validate, plan, and apply. Application image delivery remains separate in `.github/workflows/docker.yaml`.
 
@@ -133,7 +137,7 @@ The intended public endpoint is `https://grafana.devopsbydishen.shop`, routed th
 
 ## GitOps Verification
 
-ArgoCD successfully reconciled the application and reported it as:
+The original live deployment was previously captured with ArgoCD reporting:
 
 - **Healthy**
 - **Synced**
@@ -141,6 +145,8 @@ ArgoCD successfully reconciled the application and reported it as:
 <img width="2092" height="1125" alt="ArgoCD Threat Composer Healthy and Synced" src="https://github.com/user-attachments/assets/64b74517-caf9-457b-8af4-0eadff55afe7" />
 
 The ArgoCD resource tree shows the Deployment, ReplicaSet, Pod, Service, Ingress, and TLS Certificate managed through GitOps.
+
+That historical screenshot does not verify a future workflow run. A green GitHub Actions job proves that CI published the image and updated Git; current ArgoCD and Kubernetes status must be checked separately with the verification script while the cluster is running.
 
 The intended public endpoint is `https://argocd.devopsbydishen.shop`. NGINX connects to the `argocd-server:443` backend over HTTPS.
 
@@ -244,7 +250,7 @@ This installs:
 
 ### 6. Deploy the application
 
-Run the application pipeline or push an application change to `main`.
+Run the application workflow manually against `main`. A normal push verifies the application but does not publish an image or change the GitOps manifest.
 
 ### 7. Verify the deployment
 
@@ -333,6 +339,20 @@ This allows Route 53 permissions to be scoped specifically to the workload that 
 
 Container images are tagged with Git commit SHAs to provide traceability between the source code, ECR image, and Kubernetes deployment.
 
+### Why a Static Runtime Image?
+
+Threat Composer is compiled during the Docker build and served by an unprivileged NGINX runtime instead of shipping the source tree, development dependencies, and React development server.
+
+Local `linux/amd64` builds on 3 November 2026 measured:
+
+| Image | Size |
+|---|---:|
+| Previous Node development-server runtime | 224,558,701 bytes (214.16 MiB) |
+| Patched NGINX static runtime | 30,840,964 bytes (29.41 MiB) |
+| Reduction | 86.3% |
+
+The optimized image returned `200` from `/healthz`, served the homepage and a client-side route, and ran as non-root user `101`. A local Trivy 0.70.0 scan found zero fixable `HIGH` or `CRITICAL` OS/library vulnerabilities at scan time. These are local Docker measurements, not ECR transfer size or live EKS performance results.
+
 ### Why One NAT Gateway?
 
 A single NAT Gateway was used to reduce the cost of the portfolio environment.
@@ -343,4 +363,4 @@ A production environment requiring stronger Availability Zone independence would
 
 ## Project Status
 
-The original Threat Composer deployment, GitOps reconciliation, monitoring stack, HTTPS application endpoint, and teardown have prior test evidence in this repository. This closeout revision adds the OIDC Terraform workflow and public Grafana and ArgoCD ingresses, but a fresh end-to-end apply, platform deployment, endpoint check, GitOps reconciliation, and teardown still need to be run after the changes are committed.
+The original Threat Composer deployment, GitOps reconciliation, monitoring stack, HTTPS endpoint, and teardown have prior evidence in this repository. The production image, application tests and local container smoke checks have been rerun for this revision. Because the AWS environment remains destroyed to control cost, the updated GitHub Actions workflow, ECR publication, ArgoCD reconciliation, Kubernetes rollout, public endpoints and teardown have not yet been revalidated end to end.
